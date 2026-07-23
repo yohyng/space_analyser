@@ -2,26 +2,28 @@
 
 Web カメラ / デバイスのカメラ映像から、空間の状態を **定量指標** としてリアルタイムに解析し、ログとして記録する Web アプリです。
 
-- フロントエンド: React + Vite（カメラ映像の取得・表示、リアルタイム指標のダッシュボード / グラフ表示）
-- バックエンド: FastAPI + OpenCV（フレームごとの画像解析、指標算出、ログの永続化）
+- フロントエンド: React + Vite（カメラ映像の取得・表示、指標ごとのスモールマルチプルなグラフ表示）
+- バックエンド: FastAPI + KUKAN 決定論的指標コア（`kukan_metrics.py`）＋ OpenCV（フレームの前処理・ログの永続化）
 - 通信: WebSocket でフレーム（JPEG, Base64）を送信し、解析結果を即座に受信
 
 ## 構成
 
 ```
 space_analyser/
-├── backend/            FastAPI + OpenCV による解析サーバー
+├── backend/                  FastAPI による解析サーバー
 │   ├── app/
-│   │   ├── main.py     API / WebSocket エンドポイント
-│   │   ├── metrics.py  定量指標の算出ロジック（拡張ポイント）
-│   │   └── db.py       SQLite へのログ保存
-│   ├── Dockerfile      Railway 等へのデプロイ用
-│   ├── railway.json    Railway ビルド/ヘルスチェック設定
+│   │   ├── main.py           API / WebSocket エンドポイント
+│   │   ├── metrics.py        FrameAnalyzer（前処理・時間依存指標・METRIC_DEFINITIONS）
+│   │   ├── kukan_metrics.py  KUKAN 決定論的指標コア（再現性のため無改変で移植）
+│   │   └── db.py             SQLite へのログ保存
+│   ├── tests/                 test_kukan_metrics.py（参照実装と同一結果になることを検証）
+│   ├── Dockerfile            Railway 等へのデプロイ用
+│   ├── railway.json          Railway ビルド/ヘルスチェック設定
 │   └── requirements.txt
-└── frontend/           React + Vite の Web アプリ
+└── frontend/                 React + Vite の Web アプリ
     └── src/
-        ├── components/ CameraFeed, MetricsDashboard, MetricsChart, LogHistory
-        └── hooks/       useCamera, useAnalysisSocket, useMetricSchema
+        ├── components/       CameraFeed, MetricsGrid, MetricTile, LogHistory
+        └── hooks/            useCamera, useAnalysisSocket, useMetricSchema
 ```
 
 ## セットアップと起動
@@ -53,25 +55,28 @@ npm run dev
 
 ## 算出している定量指標
 
-`backend/app/metrics.py` の `FrameAnalyzer` で、フレームごとに以下を算出しています（すべて OpenCV / numpy によるリアルタイム計算）。
+画像1枚から算出する31指標は **KUKAN 決定論的指標コア**（`kukan-image-first-metrics-1.0.0`）をそのまま採用しています。同じ前処理済み画像を渡せば常に同じ結果になる再現性を優先した仕様で、`backend/app/kukan_metrics.py` は提供されたリファレンス実装を無改変で移植し、`backend/tests/test_kukan_metrics.py` で参照実装と同一の結果になることを検証しています。
+
+前処理は仕様どおり固定です: 最大辺 720px にリサイズ（LANCZOS）、輝度 `Y=0.2126R+0.7152G+0.0722B`、中央差分勾配、暗部/明部/エッジ/高周波の閾値固定、最終値は `0〜1` に clamp して half-up で小数第4位に丸め。
 
 | グループ | 指標 |
 | --- | --- |
-| 照明 | 明るさ（平均輝度）、コントラスト（輝度標準偏差）、ミケルソンコントラスト |
-| 画質 | 鮮明度（ラプラシアン分散）、ぼやけ領域の割合、ノイズ推定量 |
-| 構造 | エッジ密度、直線検出数（Hough変換）、左右対称性、三分割構図スコア |
-| 色彩 | 彩度平均、カラフルさ指数（Hasler–Süsstrunk）、色情報エントロピー、色多様性、平均色（RGB） |
-| 動的変化 | 動き量（前フレーム差分）、前景占有率（背景モデル差分） |
-| 総合 | 乱雑度指数（上記の一部を統合した簡易スコア） |
+| 光・明暗 | 平均明度、コントラスト、暗部比率、明部比率、中間調比率 |
+| 色彩 | 平均彩度、カラフルネス、色相多様性、暖色比率、寒色比率 |
+| 複雑性・テクスチャ | 輝度エントロピー、エッジ密度、エッジ強度、方向多様性、局所テクスチャ変動、高周波成分 |
+| 構図・幾何 | 視覚重心X/Y、中心からのズレ、左右/上下バランス、左右/上下対称性、水平垂直軸性 |
+| 空間プロキシ | 奥行き手がかり、開放感、囲われ感、前中背景分離、前景重み、背景明るさ、空間明瞭性 |
+| 動的変化 | 動き量、前景占有率（前フレーム・背景モデルとの差分。単一画像では再現できないためKUKAN仕様の対象外として別枠で維持） |
+
+各解析結果には `spec_version`（例: `kukan-image-first-metrics-1.0.0`）が付与され、WebSocketの応答・DBログ・CSVエクスポートすべてに保存されます。指標の算出ロジック自体を変更した場合は `SPEC_VERSION` を更新し、過去ログと区別できるようにしてください。
 
 指標の一覧・ラベル・単位は `GET /api/metrics/schema` から取得でき、フロントエンドはこれを使って動的に表示を組み立てています。
 
 ### 指標を追加するには
 
-1. `backend/app/metrics.py` の `METRIC_DEFINITIONS` にキー・ラベル・単位・説明を追加
-2. `FrameAnalyzer.analyze()` で計算し、返り値の dict に同じキーで値を追加
-
-フロントエンドはスキーマを動的に読み込むため、追加のUI改修なしに新しい指標カードが表示されます。
+- KUKAN仕様に準じた再現性のある指標を追加する場合: `kukan_metric_spec.json` 相当の定義を追い、`kukan_metrics.py` の `analyze_rgba` に実装（既存の関数は変更しない）
+- 時系列・状態依存の指標（今の動き量・前景占有率のような）を追加する場合: `backend/app/metrics.py` の `FrameAnalyzer.analyze()` に追加
+- どちらの場合も `backend/app/metrics.py` の `METRIC_DEFINITIONS` にキー・ラベル・単位・説明を追加すれば、フロントエンドはスキーマを動的に読み込むため追加のUI改修なしに新しい指標タイルが表示されます
 
 ## ログ
 

@@ -18,6 +18,7 @@ export interface WsResultMessage {
   session_id: string;
   ts: string;
   log_id: number | null;
+  spec_version: string;
   metrics: MetricsRecord;
 }
 
@@ -32,6 +33,7 @@ export interface LogEntry {
   id: number;
   session_id: string;
   ts: string;
+  spec_version: string | null;
   metrics: MetricsRecord;
 }
 

@@ -116,13 +116,15 @@ async def ws_analyze(websocket: WebSocket) -> None:
                 await websocket.send_text(json.dumps({"type": "error", "message": "invalid image"}))
                 continue
 
-            metrics = analyzer.analyze(frame)
+            analysis = analyzer.analyze(frame)
+            spec_version = analysis["spec_version"]
+            metrics = analysis["metrics"]
             ts = datetime.now(timezone.utc).isoformat()
 
             should_log = message.get("log", True)
             log_id = None
             if should_log:
-                log_id = db.insert_log(session_id, ts, metrics)
+                log_id = db.insert_log(session_id, ts, spec_version, metrics)
 
             await websocket.send_text(
                 json.dumps(
@@ -131,6 +133,7 @@ async def ws_analyze(websocket: WebSocket) -> None:
                         "session_id": session_id,
                         "ts": ts,
                         "log_id": log_id,
+                        "spec_version": spec_version,
                         "metrics": metrics,
                     }
                 )

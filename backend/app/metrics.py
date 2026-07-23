@@ -1,19 +1,25 @@
 """Quantitative space-analysis metrics computed from a single camera frame.
 
-Each metric is a small, independent function of the frame (plus rolling
-state for temporal metrics like motion). New metrics can be added by
-appending to METRIC_DEFINITIONS and implementing the corresponding
-computation in FrameAnalyzer.analyze().
+The 31 image-statistics metrics are the KUKAN deterministic core
+(`kukan_metrics.py`, spec `kukan-image-first-metrics-1.0.0`) — ported
+unmodified from the reference implementation so results stay reproducible:
+same preprocessed image in, same numbers out, regardless of when or how
+often a frame is analyzed. `motion_level` and `foreground_ratio` are the
+two exceptions: they compare a frame against recent history (previous
+frame / running background average), which is inherently not a
+single-image-reproducible quantity, so they are kept as a separate
+"dynamic change" group layered on top of the deterministic core.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 import cv2
 import numpy as np
+from PIL import Image
 
-ANALYSIS_WIDTH = 320  # frames are downscaled to this width before analysis
+from .kukan_metrics import MAX_ANALYSIS_SIZE, SPEC_VERSION, analyze_rgba, round4
 
 
 @dataclass
@@ -25,104 +31,68 @@ class MetricDef:
     description_ja: str
 
 
+def _d(high: str, low: str, note: str = "") -> str:
+    text = f"高いと{high}。低いと{low}。"
+    return f"{text}({note})" if note else text
+
+
 METRIC_DEFINITIONS: list[MetricDef] = [
-    MetricDef("brightness_mean", "明るさ（平均輝度）", "0-255", "照明", "画面全体の平均輝度"),
-    MetricDef("brightness_std", "コントラスト（輝度標準偏差）", "0-255", "照明", "明暗のばらつき"),
-    MetricDef("contrast_michelson", "ミケルソンコントラスト", "0-1", "照明", "最明部と最暗部の差の比率"),
-    MetricDef("sharpness", "鮮明度（ラプラシアン分散）", "a.u.", "画質", "ピントの合い具合。値が低いほどぼやけている"),
-    MetricDef("blur_ratio", "ぼやけ領域の割合", "0-1", "画質", "画面内でピントが甘い領域の割合"),
-    MetricDef("noise_estimate", "ノイズ推定量", "a.u.", "画質", "画像に含まれる高周波ノイズの推定量"),
-    MetricDef("edge_density", "エッジ密度", "0-1", "構造", "輪郭線が占める画素の割合。物の多さ・複雑さの目安"),
-    MetricDef("line_count", "直線検出数", "本", "構造", "ハフ変換で検出した直線の本数。人工物の多さの目安"),
-    MetricDef("symmetry_score", "左右対称性", "0-1", "構造", "画面の左右対称性。1に近いほど対称"),
-    MetricDef("rule_of_thirds_score", "三分割構図スコア", "0-1", "構造", "三分割線付近へのエッジの集中度"),
-    MetricDef("saturation_mean", "彩度（平均）", "0-255", "色彩", "色の鮮やかさの平均"),
-    MetricDef("colorfulness", "カラフルさ指数", "a.u.", "色彩", "Hasler-Süsstrunk法によるカラフルさ"),
-    MetricDef("color_entropy", "色情報エントロピー", "bit", "色彩", "輝度分布の情報量。高いほど情報量が多い"),
-    MetricDef("unique_color_ratio", "色多様性", "0-1", "色彩", "量子化した色空間のうち使用されている割合"),
-    MetricDef("avg_color_r", "平均色 R", "0-255", "色彩", "画面の平均色（赤成分）"),
-    MetricDef("avg_color_g", "平均色 G", "0-255", "色彩", "画面の平均色（緑成分）"),
-    MetricDef("avg_color_b", "平均色 B", "0-255", "色彩", "画面の平均色（青成分）"),
-    MetricDef("motion_level", "動き量", "0-1", "動的変化", "直前フレームとの差分。動きの大きさ"),
-    MetricDef("foreground_ratio", "前景占有率", "0-1", "動的変化", "背景モデルとの差分から推定した前景（変化物・人など）の割合"),
-    MetricDef("clutter_index", "乱雑度指数", "0-100", "総合", "エッジ密度・直線数・前景占有率を統合した散らかり度の簡易指標"),
+    # 光・明暗
+    MetricDef("mean_luminance", "平均明度", "0-1", "光・明暗", _d("明るい・白い・採光が強い", "暗い・陰影が強い", "Y=0.2126R+0.7152G+0.0722B")),
+    MetricDef("contrast_index", "コントラスト", "0-1", "光・明暗", _d("明暗差が強い", "淡くフラット", "露出・編集の影響を受ける")),
+    MetricDef("dark_ratio", "暗部比率", "0-1", "光・明暗", _d("暗部・影・黒い面が多い", "暗部が少ない", "閾値55は固定")),
+    MetricDef("highlight_ratio", "明部比率", "0-1", "光・明暗", _d("白い面・発光面が多い", "強い明部が少ない", "白飛びにも反応")),
+    MetricDef("midtone_ratio", "中間調比率", "0-1", "光・明暗", _d("中間階調が多い", "暗部か明部に偏る", "階調バランスの補助指標")),
+    # 色彩
+    MetricDef("mean_saturation", "平均彩度", "0-1", "色彩", _d("鮮やかな色が多い", "無彩色・低彩度", "HSVのSを使用")),
+    MetricDef("colorfulness", "カラフルネス", "0-1", "色彩", _d("カラフル・色差が大きい", "色差が小さい", "rg=R-G, yb=0.5(R+G)-B")),
+    MetricDef("hue_entropy", "色相多様性", "0-1", "色彩", _d("多様な色相", "特定色相に偏る", "低彩度ピクセルは除外")),
+    MetricDef("warm_ratio", "暖色比率", "0-1", "色彩", _d("暖色・木質・電球色が多い", "暖色が少ない", "素材色と照明色の両方に反応")),
+    MetricDef("cool_ratio", "寒色比率", "0-1", "色彩", _d("青・寒色が多い", "寒色が少ない", "窓外の青空にも反応")),
+    # 複雑性・テクスチャ
+    MetricDef("luminance_entropy", "輝度エントロピー", "0-1", "複雑性・テクスチャ", _d("階調が多様", "単調な明度分布", "エッジ量ではなく階調分布")),
+    MetricDef("edge_density", "エッジ密度", "0-1", "複雑性・テクスチャ", _d("輪郭・細部・目地が多い", "大きな面が多い", "mag=sqrt(gx^2+gy^2)/2")),
+    MetricDef("edge_strength", "エッジ強度", "0-1", "複雑性・テクスチャ", _d("境界が強い", "境界が柔らかい", "ピントの影響を受ける")),
+    MetricDef("orientation_entropy", "方向多様性", "0-1", "複雑性・テクスチャ", _d("多方向の線", "水平・垂直等に集中", "線量ではなく方向分布")),
+    MetricDef("texture_variation", "局所テクスチャ変動", "0-1", "複雑性・テクスチャ", _d("素材感・模様が強い", "滑らかで均質", "圧縮ノイズにも反応")),
+    MetricDef("high_frequency_proxy", "高周波成分", "0-1", "複雑性・テクスチャ", _d("細部が多い", "滑らかな面が多い", "FFTではなく勾配近似")),
+    # 構図・幾何
+    MetricDef("visual_center_x", "視覚重心X", "0-1", "構図・幾何", _d("右寄り", "左寄り", "w=mag+abs(Y-meanY)*0.18+S*12")),
+    MetricDef("visual_center_y", "視覚重心Y", "0-1", "構図・幾何", _d("下寄り", "上寄り", "w=mag+abs(Y-meanY)*0.18+S*12")),
+    MetricDef("center_distance", "中心からのズレ", "0-1", "構図・幾何", _d("偏った構図", "中心に近い構図", "構図偏りの補助指標")),
+    MetricDef("left_right_balance", "左右バランス", "0-1", "構図・幾何", _d("左右が均衡", "左右に偏る", "対称性ではなく重みの均衡")),
+    MetricDef("top_bottom_balance", "上下バランス", "0-1", "構図・幾何", _d("上下が均衡", "上下に偏る", "空間写真では下寄りになりやすい")),
+    MetricDef("vertical_symmetry", "左右対称性", "0-1", "構図・幾何", _d("左右対称的", "左右差が大きい", "2px間隔でサンプリング")),
+    MetricDef("horizontal_symmetry", "上下対称性", "0-1", "構図・幾何", _d("上下が類似", "上下差が大きい", "2px間隔でサンプリング")),
+    MetricDef("axis_aligned_ratio", "水平垂直軸性", "0-1", "構図・幾何", _d("直交性が強い", "斜め線・曲線が多い", "建築写真では高くなりやすい")),
+    # 空間プロキシ
+    MetricDef("depth_cue_proxy", "奥行き手がかり", "0-1", "空間プロキシ", _d("奥行き手がかりが強い", "平面的", "深度推定ではない")),
+    MetricDef("openness_proxy", "開放感プロキシ", "0-1", "空間プロキシ", _d("明るく抜けがある", "囲われ感・密度が強い", "体験そのものではなく画像プロキシ")),
+    MetricDef("enclosure_proxy", "囲われ感プロキシ", "0-1", "空間プロキシ", _d("囲われた印象", "開けた印象", "心理効果の直接測定ではない")),
+    MetricDef("layer_separation_proxy", "前中背景分離", "0-1", "空間プロキシ", _d("レイヤー差がある", "均質で平面的", "セマンティック分割ではない")),
+    MetricDef("foreground_weight_proxy", "前景重み", "0-1", "空間プロキシ", _d("手前・床・家具が強い", "上側・奥側が強い", "本物の前景認識ではない")),
+    MetricDef("background_lightness_proxy", "背景明るさ", "0-1", "空間プロキシ", _d("上部・奥側が明るい", "上部・奥側が暗い", "背景を厳密検出していない")),
+    MetricDef("spatial_clarity_proxy", "空間明瞭性", "0-1", "空間プロキシ", _d("構造が読み取りやすい", "構造が読み取りにくい", "空間の良し悪しではない")),
+    # 動的変化 (フレーム間の時間的な変化。単一画像からは再現できない指標)
+    MetricDef("motion_level", "動き量", "0-1", "動的変化", "直前フレームとの輝度差分。動きの大きさ。(時系列依存のため単一画像では再現不可)"),
+    MetricDef("foreground_ratio", "前景占有率", "0-1", "動的変化", "背景モデルとの差分から推定した前景の割合。(時系列依存のため単一画像では再現不可)"),
 ]
 
 METRIC_KEYS = [m.key for m in METRIC_DEFINITIONS]
 
 
-def _entropy(gray: np.ndarray) -> float:
-    hist = cv2.calcHist([gray], [0], None, [256], [0, 256]).flatten()
-    hist = hist / (hist.sum() + 1e-9)
-    nz = hist[hist > 0]
-    return float(-(nz * np.log2(nz)).sum())
-
-
-def _colorfulness(frame_bgr: np.ndarray) -> float:
-    b, g, r = cv2.split(frame_bgr.astype("float32"))
-    rg = r - g
-    yb = 0.5 * (r + g) - b
-    std_rg, mean_rg = rg.std(), rg.mean()
-    std_yb, mean_yb = yb.std(), yb.mean()
-    return float(np.sqrt(std_rg**2 + std_yb**2) + 0.3 * np.sqrt(mean_rg**2 + mean_yb**2))
-
-
-def _symmetry_score(gray: np.ndarray) -> float:
-    flipped = cv2.flip(gray, 1)
-    mad = float(np.abs(gray.astype("int16") - flipped.astype("int16")).mean())
-    return max(0.0, 1.0 - mad / 255.0)
-
-
-def _noise_estimate(gray: np.ndarray) -> float:
-    # Immerkaer's fast noise estimation
-    h, w = gray.shape
-    if h < 3 or w < 3:
-        return 0.0
-    mask = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], dtype="float32")
-    conv = cv2.filter2D(gray.astype("float32"), -1, mask)
-    sigma = np.sum(np.abs(conv)) * np.sqrt(0.5 * np.pi) / (6 * (w - 2) * (h - 2))
-    return float(sigma)
-
-
-def _blur_ratio(gray: np.ndarray, grid: int = 4, threshold: float = 60.0) -> float:
-    h, w = gray.shape
-    gh, gw = h // grid, w // grid
-    if gh == 0 or gw == 0:
-        return 0.0
-    blurry = 0
-    total = 0
-    for i in range(grid):
-        for j in range(grid):
-            patch = gray[i * gh:(i + 1) * gh, j * gw:(j + 1) * gw]
-            if patch.size == 0:
-                continue
-            total += 1
-            if cv2.Laplacian(patch, cv2.CV_64F).var() < threshold:
-                blurry += 1
-    return blurry / total if total else 0.0
-
-
-def _rule_of_thirds_score(edges: np.ndarray) -> float:
-    h, w = edges.shape
-    total_energy = float(edges.sum()) + 1e-9
-    band_h, band_w = max(1, h // 8), max(1, w // 8)
-    lines_y = [h // 3, 2 * h // 3]
-    lines_x = [w // 3, 2 * w // 3]
-    energy = 0.0
-    for y in lines_y:
-        y0, y1 = max(0, y - band_h // 2), min(h, y + band_h // 2)
-        energy += float(edges[y0:y1, :].sum())
-    for x in lines_x:
-        x0, x1 = max(0, x - band_w // 2), min(w, x + band_w // 2)
-        energy += float(edges[:, x0:x1].sum())
-    return min(1.0, energy / total_energy)
-
-
-def _unique_color_ratio(frame_bgr: np.ndarray, levels: int = 4) -> float:
-    quant = (frame_bgr.astype("int32") * levels // 256).clip(0, levels - 1)
-    flat = quant[:, :, 0] * levels * levels + quant[:, :, 1] * levels + quant[:, :, 2]
-    unique = np.unique(flat).size
-    return unique / (levels**3)
+def _prepare_rgba(frame_bgr: np.ndarray) -> np.ndarray:
+    """Resize per the KUKAN preprocess spec: scale=min(720/w,720/h,1), LANCZOS."""
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    im = Image.fromarray(rgb, mode="RGB").convert("RGBA")
+    w, h = im.size
+    scale = min(MAX_ANALYSIS_SIZE / w, MAX_ANALYSIS_SIZE / h, 1)
+    out = (max(1, int(np.floor(w * scale))), max(1, int(np.floor(h * scale))))
+    if out != (w, h):
+        im = im.resize(out, Image.Resampling.LANCZOS)
+    arr = np.asarray(im, dtype=np.uint8).copy()
+    arr[arr[..., 3] == 0, :3] = 0
+    return arr
 
 
 @dataclass
@@ -132,76 +102,27 @@ class FrameAnalyzer:
     prev_gray: Optional[np.ndarray] = None
     bg_avg: Optional[np.ndarray] = None
 
-    def analyze(self, frame_bgr: np.ndarray) -> dict[str, float]:
-        h, w = frame_bgr.shape[:2]
-        if w > ANALYSIS_WIDTH:
-            scale = ANALYSIS_WIDTH / w
-            frame_bgr = cv2.resize(frame_bgr, (ANALYSIS_WIDTH, int(h * scale)))
+    def analyze(self, frame_bgr: np.ndarray) -> dict:
+        rgba = _prepare_rgba(frame_bgr)
+        result = analyze_rgba(rgba)
+        metrics: dict[str, float] = dict(result["metrics"])
 
-        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-        hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
-        edges = cv2.Canny(gray, 100, 200)
-
-        brightness_mean = float(gray.mean())
-        brightness_std = float(gray.std())
-        lmin, lmax = float(gray.min()), float(gray.max())
-        contrast_michelson = (lmax - lmin) / (lmax + lmin + 1e-9)
-
-        sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-        blur_ratio = _blur_ratio(gray)
-        noise_estimate = _noise_estimate(gray)
-
-        edge_density = float(edges.mean() / 255.0)
-        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=40, minLineLength=25, maxLineGap=8)
-        line_count = int(0 if lines is None else len(lines))
-        symmetry_score = _symmetry_score(gray)
-        rule_of_thirds_score = _rule_of_thirds_score(edges)
-
-        saturation_mean = float(hsv[:, :, 1].mean())
-        colorfulness = _colorfulness(frame_bgr)
-        color_entropy = _entropy(gray)
-        unique_color_ratio = _unique_color_ratio(frame_bgr)
-        b_mean, g_mean, r_mean = [float(x) for x in cv2.mean(frame_bgr)[:3]]
+        rgb = rgba[..., :3].astype(np.float64)
+        gray = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
 
         if self.prev_gray is not None and self.prev_gray.shape == gray.shape:
-            motion_level = float(np.abs(gray.astype("int16") - self.prev_gray.astype("int16")).mean() / 255.0)
+            motion_level = float(np.abs(gray - self.prev_gray).mean() / 255.0)
         else:
             motion_level = 0.0
         self.prev_gray = gray
 
-        gray_f32 = gray.astype("float32")
-        if self.bg_avg is None:
-            self.bg_avg = gray_f32.copy()
-        cv2.accumulateWeighted(gray_f32, self.bg_avg, 0.05)
-        diff = np.abs(gray_f32 - self.bg_avg)
-        foreground_ratio = float((diff > 25).mean())
+        if self.bg_avg is None or self.bg_avg.shape != gray.shape:
+            self.bg_avg = gray.copy()
+        else:
+            self.bg_avg = self.bg_avg * 0.95 + gray * 0.05
+        foreground_ratio = float((np.abs(gray - self.bg_avg) > 25).mean())
 
-        clutter_index = float(
-            min(
-                100.0,
-                (edge_density * 45.0 + min(line_count / 60.0, 1.0) * 35.0 + foreground_ratio * 20.0),
-            )
-        )
+        metrics["motion_level"] = round4(motion_level)
+        metrics["foreground_ratio"] = round4(foreground_ratio)
 
-        return {
-            "brightness_mean": brightness_mean,
-            "brightness_std": brightness_std,
-            "contrast_michelson": contrast_michelson,
-            "sharpness": sharpness,
-            "blur_ratio": blur_ratio,
-            "noise_estimate": noise_estimate,
-            "edge_density": edge_density,
-            "line_count": float(line_count),
-            "symmetry_score": symmetry_score,
-            "rule_of_thirds_score": rule_of_thirds_score,
-            "saturation_mean": saturation_mean,
-            "colorfulness": colorfulness,
-            "color_entropy": color_entropy,
-            "unique_color_ratio": unique_color_ratio,
-            "avg_color_r": r_mean,
-            "avg_color_g": g_mean,
-            "avg_color_b": b_mean,
-            "motion_level": motion_level,
-            "foreground_ratio": foreground_ratio,
-            "clutter_index": clutter_index,
-        }
+        return {"spec_version": SPEC_VERSION, "metrics": metrics}

@@ -95,6 +95,13 @@
   background: var(--warn);
 }
 
+.spec-version {
+  margin-left: 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  opacity: 0.6;
+}
+
 .session-id {
   margin-left: auto;
   font-family: var(--mono);
@@ -225,4 +232,11 @@
 
 .log-table-wrap {
   overflow-x: auto;
+}
+
+.log-spec-version {
+  font-family: var(--mono);
+  font-size: 11px;
+  opacity: 0.6;
+  white-space: nowrap;
 }

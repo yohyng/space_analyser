@@ -8,7 +8,7 @@ interface LogHistoryProps {
   refreshSignal: number;
 }
 
-const SUMMARY_KEYS = ["brightness_mean", "clutter_index", "motion_level", "sharpness"];
+const SUMMARY_KEYS = ["mean_luminance", "openness_proxy", "spatial_clarity_proxy", "motion_level"];
 
 export function LogHistory({ sessionId, schema, refreshSignal }: LogHistoryProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -66,6 +66,7 @@ export function LogHistory({ sessionId, schema, refreshSignal }: LogHistoryProps
               {SUMMARY_KEYS.map((key) => (
                 <th key={key}>{summaryLabel(key)}</th>
               ))}
+              <th>spec</th>
             </tr>
           </thead>
           <tbody>
@@ -73,13 +74,14 @@ export function LogHistory({ sessionId, schema, refreshSignal }: LogHistoryProps
               <tr key={log.id}>
                 <td>{new Date(log.ts).toLocaleTimeString()}</td>
                 {SUMMARY_KEYS.map((key) => (
-                  <td key={key}>{log.metrics[key]?.toFixed(2) ?? "-"}</td>
+                  <td key={key}>{log.metrics[key]?.toFixed(3) ?? "-"}</td>
                 ))}
+                <td className="log-spec-version">{log.spec_version ?? "-"}</td>
               </tr>
             ))}
             {logs.length === 0 && (
               <tr>
-                <td colSpan={SUMMARY_KEYS.length + 1} className="hint">
+                <td colSpan={SUMMARY_KEYS.length + 2} className="hint">
                   ログがありません
                 </td>
               </tr>

@@ -18,6 +18,7 @@ const INTERVAL_OPTIONS = [
 function App() {
   const { schema } = useMetricSchema();
   const [latestMetrics, setLatestMetrics] = useState<MetricsRecord | null>(null);
+  const [specVersion, setSpecVersion] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [cameraActive, setCameraActive] = useState(false);
   const [intervalMs, setIntervalMs] = useState(500);
@@ -27,6 +28,7 @@ function App() {
 
   const handleResult = useCallback((result: WsResultMessage) => {
     setLatestMetrics(result.metrics);
+    setSpecVersion(result.spec_version);
     setHistory((prev) => {
       const next = [...prev, { index: indexRef.current++, ts: result.ts, metrics: result.metrics }];
       return next.length > MAX_HISTORY ? next.slice(next.length - MAX_HISTORY) : next;
@@ -80,6 +82,7 @@ function App() {
           <div className="status-row">
             <span className={`status-dot status-${status}`} />
             解析サーバー: {statusLabel[status]}
+            {specVersion && <span className="spec-version">spec: {specVersion}</span>}
             {sessionId && <span className="session-id">session: {sessionId.slice(0, 8)}</span>}
           </div>
           <label className="control-row">

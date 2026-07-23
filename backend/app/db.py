@@ -30,10 +30,15 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
                 ts TEXT NOT NULL,
+                spec_version TEXT,
                 metrics TEXT NOT NULL
             )
             """
         )
+        # Migrate DBs created before spec_version tracking was added.
+        existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(logs)").fetchall()}
+        if "spec_version" not in existing_cols:
+            conn.execute("ALTER TABLE logs ADD COLUMN spec_version TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_session ON logs(session_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts)")
         conn.commit()
@@ -41,12 +46,12 @@ def init_db() -> None:
         conn.close()
 
 
-def insert_log(session_id: str, ts: str, metrics: dict[str, float]) -> int:
+def insert_log(session_id: str, ts: str, spec_version: str, metrics: dict[str, float]) -> int:
     conn = _connect()
     try:
         cur = conn.execute(
-            "INSERT INTO logs (session_id, ts, metrics) VALUES (?, ?, ?)",
-            (session_id, ts, json.dumps(metrics)),
+            "INSERT INTO logs (session_id, ts, spec_version, metrics) VALUES (?, ?, ?, ?)",
+            (session_id, ts, spec_version, json.dumps(metrics)),
         )
         conn.commit()
         return cur.lastrowid
@@ -59,13 +64,13 @@ def fetch_logs(limit: int = 100, offset: int = 0, session_id: Optional[str] = No
     try:
         if session_id:
             rows = conn.execute(
-                "SELECT id, session_id, ts, metrics FROM logs WHERE session_id = ? "
+                "SELECT id, session_id, ts, spec_version, metrics FROM logs WHERE session_id = ? "
                 "ORDER BY id DESC LIMIT ? OFFSET ?",
                 (session_id, limit, offset),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, session_id, ts, metrics FROM logs ORDER BY id DESC LIMIT ? OFFSET ?",
+                "SELECT id, session_id, ts, spec_version, metrics FROM logs ORDER BY id DESC LIMIT ? OFFSET ?",
                 (limit, offset),
             ).fetchall()
         result = []
@@ -75,6 +80,7 @@ def fetch_logs(limit: int = 100, offset: int = 0, session_id: Optional[str] = No
                     "id": row["id"],
                     "session_id": row["session_id"],
                     "ts": row["ts"],
+                    "spec_version": row["spec_version"],
                     "metrics": json.loads(row["metrics"]),
                 }
             )
@@ -105,7 +111,9 @@ def export_csv(session_id: Optional[str] = None) -> str:
         return ""
     metric_keys = sorted(logs[0]["metrics"].keys())
     writer = csv.writer(buf)
-    writer.writerow(["id", "session_id", "ts", *metric_keys])
+    writer.writerow(["id", "session_id", "ts", "spec_version", *metric_keys])
     for log in logs:
-        writer.writerow([log["id"], log["session_id"], log["ts"], *[log["metrics"].get(k, "") for k in metric_keys]])
+        writer.writerow(
+            [log["id"], log["session_id"], log["ts"], log["spec_version"], *[log["metrics"].get(k, "") for k in metric_keys]]
+        )
     return buf.getvalue()
