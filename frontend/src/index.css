@@ -5,10 +5,21 @@
   --panel-bg: #ffffff;
   --border: #e5e4e7;
   --code-bg: #f4f3ec;
-  --accent: #4f8ef7;
-  --accent-bg: rgba(79, 142, 247, 0.1);
-  --ok: #2fbf71;
-  --warn: #f7734f;
+
+  /* validated data-viz palette (light) — see dataviz skill references/palette.md */
+  --accent: #2a78d6;
+  --accent-bg: rgba(42, 120, 214, 0.1);
+  --series-muted: #6da7ec;
+  --gridline: #e1e0d9;
+  --ok: #0ca30c;
+  --warn: #ec835a;
+
+  --cat-1: #2a78d6; /* blue */
+  --cat-2: #eb6834; /* orange */
+  --cat-3: #1baf7a; /* aqua */
+  --cat-4: #eda100; /* yellow */
+  --cat-5: #e87ba4; /* magenta */
+  --cat-6: #008300; /* green */
 
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
@@ -31,8 +42,20 @@
     --panel-bg: #1a1c23;
     --border: #2e303a;
     --code-bg: #1f2028;
-    --accent: #7aa8fb;
-    --accent-bg: rgba(122, 168, 251, 0.15);
+
+    --accent: #3987e5;
+    --accent-bg: rgba(57, 135, 229, 0.15);
+    --series-muted: #184f95;
+    --gridline: #2c2c2a;
+    --ok: #0ca30c;
+    --warn: #ec835a;
+
+    --cat-1: #3987e5;
+    --cat-2: #d95926;
+    --cat-3: #199e70;
+    --cat-4: #c98500;
+    --cat-5: #d55181;
+    --cat-6: #008300;
   }
 }
 

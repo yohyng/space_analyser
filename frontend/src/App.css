@@ -109,40 +109,55 @@
   font-size: 14px;
 }
 
-.metrics-dashboard {
+.metrics-grid {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 22px;
+}
+
+.metric-group {
+  border-left: 3px solid var(--group-color, var(--accent));
+  padding-left: 14px;
 }
 
 .metric-group h3 {
   margin-bottom: 10px;
 }
 
-.metric-cards {
+.metric-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 10px;
 }
 
-.metric-card {
+.metric-tile {
   background: var(--panel-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 10px 12px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metric-tile-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .metric-label {
   font-size: 12px;
   opacity: 0.75;
-  margin-bottom: 4px;
+  line-height: 1.3;
 }
 
 .metric-value {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--text-h);
   font-family: var(--mono);
+  white-space: nowrap;
 }
 
 .metric-unit {
@@ -152,34 +167,45 @@
   font-family: var(--sans);
 }
 
-.metrics-chart {
+.metric-sparkline {
+  margin: 0 -4px;
+}
+
+.metric-sparkline-empty {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--text);
+  opacity: 0.5;
+}
+
+.sparkline-tooltip {
   background: var(--panel-bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px;
-}
-
-.chart-key-picker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 10px;
+  border-radius: 6px;
+  padding: 6px 10px;
   font-size: 12px;
-  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
-.chip-active {
-  border-color: var(--accent);
-  background: var(--accent-bg);
+.sparkline-tooltip strong {
+  font-family: var(--mono);
+  color: var(--text-h);
+  font-size: 14px;
+}
+
+.sparkline-tooltip span {
+  margin-left: 4px;
+  color: var(--text);
+  opacity: 0.65;
+}
+
+.sparkline-tooltip-ts {
+  color: var(--text);
+  opacity: 0.65;
+  margin-top: 2px;
 }
 
 .log-history {

@@ -2,14 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import { CameraFeed } from "./components/CameraFeed";
 import { LogHistory } from "./components/LogHistory";
-import { MetricsChart, type HistoryPoint } from "./components/MetricsChart";
-import { MetricsDashboard } from "./components/MetricsDashboard";
+import { MetricsGrid, type HistoryPoint } from "./components/MetricsGrid";
 import { useAnalysisSocket } from "./hooks/useAnalysisSocket";
 import { useMetricSchema } from "./hooks/useMetricSchema";
 import type { MetricsRecord, WsResultMessage } from "./types";
 
 const MAX_HISTORY = 200;
-const DEFAULT_SELECTED_KEYS = ["brightness_mean", "clutter_index", "motion_level", "edge_density"];
 const INTERVAL_OPTIONS = [
   { label: "0.2秒", value: 200 },
   { label: "0.5秒", value: 500 },
@@ -24,7 +22,6 @@ function App() {
   const [cameraActive, setCameraActive] = useState(false);
   const [intervalMs, setIntervalMs] = useState(500);
   const [logging, setLogging] = useState(true);
-  const [selectedKeys, setSelectedKeys] = useState<string[]>(DEFAULT_SELECTED_KEYS);
   const [refreshSignal, setRefreshSignal] = useState(0);
   const indexRef = useRef(0);
 
@@ -51,10 +48,6 @@ function App() {
     const timer = window.setInterval(() => setRefreshSignal((s) => s + 1), 5000);
     return () => window.clearInterval(timer);
   }, [status]);
-
-  const toggleKey = (key: string) => {
-    setSelectedKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
-  };
 
   const connected = status === "open";
   const statusLabel: Record<string, string> = {
@@ -107,13 +100,8 @@ function App() {
       </div>
 
       <section>
-        <h2>リアルタイム指標</h2>
-        <MetricsDashboard schema={schema} metrics={latestMetrics} />
-      </section>
-
-      <section>
-        <h2>推移グラフ</h2>
-        <MetricsChart schema={schema} history={history} selectedKeys={selectedKeys} onToggleKey={toggleKey} />
+        <h2>指標</h2>
+        <MetricsGrid schema={schema} latestMetrics={latestMetrics} history={history} />
       </section>
 
       <section>
