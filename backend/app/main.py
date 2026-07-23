@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -17,9 +18,12 @@ from .metrics import METRIC_DEFINITIONS, FrameAnalyzer
 
 app = FastAPI(title="Space Analyser API")
 
+_allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", "*")
+_allowed_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

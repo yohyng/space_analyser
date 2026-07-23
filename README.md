@@ -15,6 +15,8 @@ space_analyser/
 │   │   ├── main.py     API / WebSocket エンドポイント
 │   │   ├── metrics.py  定量指標の算出ロジック（拡張ポイント）
 │   │   └── db.py       SQLite へのログ保存
+│   ├── Dockerfile      Railway 等へのデプロイ用
+│   ├── railway.json    Railway ビルド/ヘルスチェック設定
 │   └── requirements.txt
 └── frontend/           React + Vite の Web アプリ
     └── src/
@@ -77,6 +79,30 @@ npm run dev
 - `GET /api/logs?limit=&session_id=` : ログ一覧の取得
 - `GET /api/logs/export.csv?session_id=` : CSV エクスポート
 - `GET /api/sessions` : セッション（接続単位）ごとの集計
+
+## デプロイ（Vercel + Railway）
+
+フロントエンドは静的サイトとして Vercel に、バックエンドは WebSocket 常駐プロセスが必要なため Railway にデプロイする構成を想定しています。
+
+### バックエンド（Railway）
+
+1. Railway で `New Project` → `Deploy from GitHub repo` でこのリポジトリを選択
+2. サービスの `Settings` → `Root Directory` を `backend` に設定（`backend/Dockerfile` が自動検出されます）
+3. `Settings` → `Volumes` で永続ボリュームを追加し、マウントパスを `/data` にする（SQLite のファイルを再デプロイ後も残すため）
+4. `Variables` に環境変数を追加
+   - `SPACE_ANALYSER_DB_PATH=/data/space_analyser.db`（ボリュームのマウント先に SQLite を保存）
+   - `ALLOWED_ORIGINS=https://<vercelのドメイン>`（未設定の場合は `*` で全許可）
+5. デプロイ後に発行される公開URL（例: `https://xxxx.up.railway.app`）を控える
+   - ヘルスチェックは `/api/health` を使用するよう `railway.json` に設定済み
+
+### フロントエンド（Vercel）
+
+1. Vercel で `New Project` → このリポジトリを選択
+2. `Root Directory` を `frontend` に設定（Framework は Vite が自動検出されます）
+3. `Environment Variables` に `VITE_API_BASE_URL` として Railway の公開URL（`https://xxxx.up.railway.app`）を設定
+4. デプロイ後、Vercel のドメインを Railway 側の `ALLOWED_ORIGINS` に反映して再デプロイ（CORSを絞る場合）
+
+> カメラ利用には HTTPS が必須ですが、Vercel の発行ドメインは標準で HTTPS のためそのまま利用できます。
 
 ## 今後の拡張候補
 

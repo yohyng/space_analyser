@@ -4,11 +4,13 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Optional
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "space_analyser.db"
+_default_db_path = Path(__file__).resolve().parent.parent / "data" / "space_analyser.db"
+DB_PATH = Path(os.environ.get("SPACE_ANALYSER_DB_PATH", _default_db_path))
 
 
 def _connect() -> sqlite3.Connection:
