@@ -30,6 +30,29 @@
   }
 }
 
+/* Tablet: hold the device, keep the camera pinned in view while metrics scroll underneath. */
+@media (max-width: 1024px) {
+  .top-grid {
+    grid-template-columns: 1fr;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--bg);
+    margin: 0 -20px;
+    padding: 10px 20px 10px;
+    box-shadow: 0 8px 12px -8px rgba(0, 0, 0, 0.18);
+  }
+
+  .camera-video {
+    max-height: 34vh;
+  }
+
+  .control-panel {
+    padding: 10px 14px;
+    gap: 8px;
+  }
+}
+
 .camera-feed {
   background: var(--panel-bg);
   border: 1px solid var(--border);
@@ -114,6 +137,65 @@
   align-items: center;
   gap: 10px;
   font-size: 14px;
+}
+
+.view-toggle {
+  display: inline-flex;
+  gap: 4px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 16px;
+}
+
+.view-toggle button {
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  background: transparent;
+  font-size: 13px;
+}
+
+.view-toggle button.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.metrics-radar {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.radar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  justify-content: center;
+  margin: 4px 0 10px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.metrics-radar-empty {
+  text-align: center;
+  padding: 40px 0;
 }
 
 .metrics-grid {

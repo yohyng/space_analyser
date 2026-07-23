@@ -3,6 +3,7 @@ import "./App.css";
 import { CameraFeed } from "./components/CameraFeed";
 import { LogHistory } from "./components/LogHistory";
 import { MetricsGrid, type HistoryPoint } from "./components/MetricsGrid";
+import { MetricsRadar } from "./components/MetricsRadar";
 import { useAnalysisSocket } from "./hooks/useAnalysisSocket";
 import { useMetricSchema } from "./hooks/useMetricSchema";
 import type { MetricsRecord, WsResultMessage } from "./types";
@@ -24,6 +25,7 @@ function App() {
   const [intervalMs, setIntervalMs] = useState(500);
   const [logging, setLogging] = useState(true);
   const [refreshSignal, setRefreshSignal] = useState(0);
+  const [view, setView] = useState<"detail" | "radar">("detail");
   const indexRef = useRef(0);
 
   const handleResult = useCallback((result: WsResultMessage) => {
@@ -104,7 +106,19 @@ function App() {
 
       <section>
         <h2>指標</h2>
-        <MetricsGrid schema={schema} latestMetrics={latestMetrics} history={history} />
+        <div className="view-toggle">
+          <button className={view === "detail" ? "active" : ""} onClick={() => setView("detail")}>
+            詳細
+          </button>
+          <button className={view === "radar" ? "active" : ""} onClick={() => setView("radar")}>
+            統合ビュー
+          </button>
+        </div>
+        {view === "detail" ? (
+          <MetricsGrid schema={schema} latestMetrics={latestMetrics} history={history} />
+        ) : (
+          <MetricsRadar schema={schema} latestMetrics={latestMetrics} />
+        )}
       </section>
 
       <section>

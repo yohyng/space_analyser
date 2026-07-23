@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { GROUP_COLORS } from "../groupColors";
 import { MetricTile } from "./MetricTile";
 import type { MetricSchemaItem, MetricsRecord } from "../types";
 
@@ -13,8 +14,6 @@ interface MetricsGridProps {
   latestMetrics: MetricsRecord | null;
   history: HistoryPoint[];
 }
-
-const GROUP_COLORS = ["var(--cat-1)", "var(--cat-2)", "var(--cat-3)", "var(--cat-4)", "var(--cat-5)", "var(--cat-6)"];
 
 export function MetricsGrid({ schema, latestMetrics, history }: MetricsGridProps) {
   const groups = useMemo(() => Array.from(new Set(schema.map((m) => m.group))), [schema]);
