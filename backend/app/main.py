@@ -20,10 +20,17 @@ app = FastAPI(title="Space Analyser API")
 
 _allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", "*")
 _allowed_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
+# Vercel gives every deployment (production + each preview/branch build) its own
+# unique subdomain in addition to the stable production domain; match them all
+# by default so preview URLs aren't blocked. Override with ALLOWED_ORIGIN_REGEX.
+_allowed_origin_regex = os.environ.get(
+    "ALLOWED_ORIGIN_REGEX", r"^https://space-analyser(-[a-zA-Z0-9-]+)?\.vercel\.app$"
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
+    allow_origin_regex=_allowed_origin_regex,
     allow_methods=["*"],
     allow_headers=["*"],
 )
