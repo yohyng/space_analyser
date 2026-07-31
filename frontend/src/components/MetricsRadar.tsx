@@ -41,10 +41,14 @@ export function MetricsRadar({ schema, latestMetrics }: MetricsRadarProps) {
     return <p className="hint metrics-radar-empty">計測を開始すると表示されます</p>;
   }
 
-  const groups = Array.from(new Set(schema.map((m) => m.group)));
+  // Limited to the "core" (KUKAN deterministic + temporal) metrics — the full
+  // set including the newer real-time-extra metrics is too many spokes for
+  // the labels to stay readable; see those in the 詳細 tile grid instead.
+  const coreSchema = schema.filter((m) => m.core);
+  const groups = Array.from(new Set(coreSchema.map((m) => m.group)));
   const groupColor = (group: string) => GROUP_COLORS[groups.indexOf(group) % GROUP_COLORS.length];
 
-  const data: RadarDatum[] = schema.map((item) => ({
+  const data: RadarDatum[] = coreSchema.map((item) => ({
     key: item.key,
     label: item.label,
     group: item.group,
@@ -99,7 +103,9 @@ export function MetricsRadar({ schema, latestMetrics }: MetricsRadarProps) {
           </span>
         ))}
       </div>
-      <p className="hint">※ 全指標は0〜1の範囲に正規化済みのため、そのままレーダーの半径として表示しています。</p>
+      <p className="hint">
+        ※ KUKAN決定論的コア(基本{coreSchema.length}指標)を表示しています。全{schema.length}指標は「詳細」タブで確認できます。0〜1の範囲に正規化済みのため、そのままレーダーの半径として表示しています。
+      </p>
     </div>
   );
 }

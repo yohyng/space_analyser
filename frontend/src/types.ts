@@ -4,6 +4,7 @@ export interface MetricSchemaItem {
   unit: string;
   group: string;
   description: string;
+  core: boolean;
 }
 
 export type MetricsRecord = Record<string, number>;

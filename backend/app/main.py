@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -55,6 +56,7 @@ def metrics_schema() -> list[dict]:
             "unit": m.unit,
             "group": m.group,
             "description": m.description_ja,
+            "core": m.core,
         }
         for m in METRIC_DEFINITIONS
     ]
@@ -111,12 +113,30 @@ async def ws_analyze(websocket: WebSocket) -> None:
             if message.get("type") != "frame":
                 continue
 
+            # Analysis can take longer than the client's capture interval (the full
+            # metric set is ~0.1-0.3s/frame); if more frames are already buffered,
+            # skip straight to the newest one instead of falling progressively
+            # further behind over a long-running connection.
+            while True:
+                try:
+                    next_raw = await asyncio.wait_for(websocket.receive_text(), timeout=0.001)
+                except asyncio.TimeoutError:
+                    break
+                try:
+                    next_message = json.loads(next_raw)
+                except json.JSONDecodeError:
+                    continue
+                if next_message.get("type") == "frame":
+                    message = next_message
+
             frame = _decode_frame(message.get("image", ""))
             if frame is None:
                 await websocket.send_text(json.dumps({"type": "error", "message": "invalid image"}))
                 continue
 
-            analysis = analyzer.analyze(frame)
+            # CPU-bound (~0.1-0.3s); run off the event loop so other connections
+            # (health checks, other sessions) aren't blocked while it runs.
+            analysis = await asyncio.to_thread(analyzer.analyze, frame)
             spec_version = analysis["spec_version"]
             metrics = analysis["metrics"]
             ts = datetime.now(timezone.utc).isoformat()

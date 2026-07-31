@@ -19,6 +19,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from .extra_metrics import EXTRA_SPEC_VERSION, compute_extra_metrics
 from .kukan_metrics import MAX_ANALYSIS_SIZE, SPEC_VERSION, analyze_rgba, round4
 
 
@@ -29,6 +30,13 @@ class MetricDef:
     unit: str
     group: str
     description_ja: str
+    # True for the KUKAN deterministic core + the two temporal metrics layered on
+    # top of it (the original 33) — the set stable/curated enough for an
+    # at-a-glance overview like a radar chart. False for the newer real-time
+    # "extra" metrics (extra_metrics.py), which are numerous enough that mixing
+    # them into a single radar makes the spoke labels unreadable; they're still
+    # fully available in the per-metric tile grid.
+    core: bool = True
 
 
 def _d(high: str, low: str, note: str = "") -> str:
@@ -76,6 +84,40 @@ METRIC_DEFINITIONS: list[MetricDef] = [
     # 動的変化 (フレーム間の時間的な変化。単一画像からは再現できない指標)
     MetricDef("motion_level", "動き量", "0-1", "動的変化", "直前フレームとの輝度差分。動きの大きさ。(時系列依存のため単一画像では再現不可)"),
     MetricDef("foreground_ratio", "前景占有率", "0-1", "動的変化", "背景モデルとの差分から推定した前景の割合。(時系列依存のため単一画像では再現不可)"),
+
+    # --- ここから拡張指標（extra_metrics.py, 決定論的だがKUKAN仕様外の独自実装） ---
+    # コヒーレンス
+    MetricDef("coherence_mean", "構造コヒーレンス", "0-1", "コヒーレンス", "構造テンソルの異方性。高いと線状の強い方向性構造、低いと方向性の弱い一様な質感。", core=False),
+    # 周波数解析
+    MetricDef("spectral_entropy", "スペクトルエントロピー", "0-1", "周波数解析", "パワースペクトルのエントロピー。高いと周波数成分が均等に分布(複雑)、低いと特定周波数に偏る。", core=False),
+    MetricDef("spectral_slope", "スペクトル傾斜", "0-1", "周波数解析", "動径パワースペクトルのlog-log傾き。高いと急な高周波ロールオフ(滑らかな画像)。", core=False),
+    MetricDef("radial_entropy", "動径エントロピー", "0-1", "周波数解析", "動径方向のパワー分布のエントロピー。高いと様々なスケールの構造が混在。", core=False),
+    MetricDef("band_ratio_low", "低域エネルギー比率", "0-1", "周波数解析", "空間周波数の低域が占めるエネルギー比率。", core=False),
+    MetricDef("band_ratio_mid", "中域エネルギー比率", "0-1", "周波数解析", "空間周波数の中域が占めるエネルギー比率。", core=False),
+    MetricDef("band_ratio_high", "高域エネルギー比率", "0-1", "周波数解析", "空間周波数の高域が占めるエネルギー比率。", core=False),
+    MetricDef("directional_entropy", "方向エントロピー(周波数)", "0-1", "周波数解析", "エッジ方向分布のエントロピー。高いと多方向、低いと特定方向に偏る。", core=False),
+    MetricDef("anisotropy_index", "異方性指数", "0-1", "周波数解析", "方向エネルギー分布の異方性。高いと特定方向に強く偏る。", core=False),
+    # 幾何(拡張)
+    MetricDef("vanishing_point_confidence", "消失点confidence", "0-1", "幾何(拡張)", "直線交点クラスタリングによる消失点の明確さ。高いと収束する直線群(廊下・道路等)がある。", core=False),
+    MetricDef("rectilinearity", "直交性", "0-1", "幾何(拡張)", "検出した直線のうち水平・垂直方向が占める長さの割合。高いと直交性が強い(建築的)。", core=False),
+    MetricDef("curvature_complexity", "曲率複雑性", "0-1", "幾何(拡張)", "輪郭の曲率複雑性。高いと曲線・不規則な形状が多い。", core=False),
+    # トポロジー
+    MetricDef("free_space_ratio", "自由空間比率", "0-1", "トポロジー", "二値化後の主要領域(空白域)が占める割合。", core=False),
+    MetricDef("largest_component_ratio", "最大成分比", "0-1", "トポロジー", "空白領域のうち最大連結成分が占める割合。高いと一体的な広い空間。", core=False),
+    MetricDef("mean_access_radius", "平均到達半径", "0-1", "トポロジー", "距離変換の平均値。高いと障害物から離れた開けた領域が多い。", core=False),
+    MetricDef("corridor_index", "コリドー指数", "0-1", "トポロジー", "狭い通路状領域(距離変換下位25%)の平均到達距離。", core=False),
+    # 色彩(拡張)
+    MetricDef("hue_circular_variance", "色相円分散", "0-1", "色彩(拡張)", "色相の円周分散。高いと色相がバラける、低いと特定色相に集中。", core=False),
+    MetricDef("complementary_contrast", "補色コントラスト", "0-1", "色彩(拡張)", "色相ヒストグラムとその補色(180°シフト)との負の相関。高いと補色関係の色が共存。", core=False),
+    MetricDef("saturation_std", "彩度コントラスト", "0-1", "色彩(拡張)", "彩度の標準偏差。高いと鮮やかさにばらつきがある。", core=False),
+    MetricDef("brightness_range", "明度コントラスト", "0-1", "色彩(拡張)", "明度(V)の90-10パーセンタイル差。高いと明暗の幅が広い。", core=False),
+    MetricDef("dominant_color_ratio", "主要色占有率", "0-1", "色彩(拡張)", "MiniBatchKMeans(K=5)による主要色のうち最大クラスタが占める割合。高いと単色的。", core=False),
+    # 注意・顕著性
+    MetricDef("attention_peak_ratio", "注意ピーク比率", "0-1", "注意・顕著性", "顕著性マップ上位10%が占めるエネルギー比率。高いと注意が一点に集中。", core=False),
+    MetricDef("attention_balance", "注意バランス", "0-1", "注意・顕著性", "3x3グリッドでの顕著性分布の均衡度。高いと画面全体に注意が分散。", core=False),
+    MetricDef("attention_flow_strength", "注意フロー強度", "0-1", "注意・顕著性", "顕著性マップの勾配強度平均。高いと注意の変化が急激。", core=False),
+    MetricDef("attention_direction_consistency", "注意方向一貫性", "0-1", "注意・顕著性", "顕著性勾配方向の一貫性。高いと注意の流れが一方向に揃う。", core=False),
+    MetricDef("attention_entropy", "注意エントロピー", "0-1", "注意・顕著性", "顕著性マップの空間エントロピー。高いと注意が画面全体に拡散。", core=False),
 ]
 
 METRIC_KEYS = [m.key for m in METRIC_DEFINITIONS]
@@ -106,6 +148,7 @@ class FrameAnalyzer:
         rgba = _prepare_rgba(frame_bgr)
         result = analyze_rgba(rgba)
         metrics: dict[str, float] = dict(result["metrics"])
+        metrics.update(compute_extra_metrics(rgba[..., :3]))
 
         rgb = rgba[..., :3].astype(np.float64)
         gray = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
@@ -125,4 +168,5 @@ class FrameAnalyzer:
         metrics["motion_level"] = round4(motion_level)
         metrics["foreground_ratio"] = round4(foreground_ratio)
 
-        return {"spec_version": SPEC_VERSION, "metrics": metrics}
+        spec_version = f"{SPEC_VERSION}+{EXTRA_SPEC_VERSION}"
+        return {"spec_version": spec_version, "metrics": metrics}

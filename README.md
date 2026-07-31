@@ -15,8 +15,9 @@ space_analyser/
 │   │   ├── main.py           API / WebSocket エンドポイント
 │   │   ├── metrics.py        FrameAnalyzer（前処理・時間依存指標・METRIC_DEFINITIONS）
 │   │   ├── kukan_metrics.py  KUKAN 決定論的指標コア（再現性のため無改変で移植）
+│   │   ├── extra_metrics.py  周波数解析・幾何・トポロジー・色彩・注意/顕著性の拡張指標
 │   │   └── db.py             SQLite へのログ保存
-│   ├── tests/                 test_kukan_metrics.py（参照実装と同一結果になることを検証）
+│   ├── tests/                 test_kukan_metrics.py / test_extra_metrics.py
 │   ├── Dockerfile            Railway 等へのデプロイ用
 │   ├── railway.json          Railway ビルド/ヘルスチェック設定
 │   └── requirements.txt
@@ -68,15 +69,29 @@ npm run dev
 | 空間プロキシ | 奥行き手がかり、開放感、囲われ感、前中背景分離、前景重み、背景明るさ、空間明瞭性 |
 | 動的変化 | 動き量、前景占有率（前フレーム・背景モデルとの差分。単一画像では再現できないためKUKAN仕様の対象外として別枠で維持） |
 
-各解析結果には `spec_version`（例: `kukan-image-first-metrics-1.0.0`）が付与され、WebSocketの応答・DBログ・CSVエクスポートすべてに保存されます。指標の算出ロジック自体を変更した場合は `SPEC_VERSION` を更新し、過去ログと区別できるようにしてください。
+これに加えて `backend/app/extra_metrics.py` で26の拡張指標を算出しています。「画像特徴量 — 計算式・使用AIモデル一覧」で提示された指標のうち、**重量MLモデル（MiDaSやYOLOv8など）を使わずリアルタイム(0.2〜2秒間隔)で計算できるもの**だけを対象にした独自実装です（KUKANと違い、フォーミュラは踏襲していますがコードは私たち自身の実装で、byte-exactな仕様ではありません）。処理コストを抑えるため360px相当にダウンスケールして計算しています。
 
-指標の一覧・ラベル・単位は `GET /api/metrics/schema` から取得でき、フロントエンドはこれを使って動的に表示を組み立てています。
+| グループ | 指標 |
+| --- | --- |
+| コヒーレンス | 構造コヒーレンス（構造テンソル） |
+| 周波数解析 | スペクトルエントロピー、スペクトル傾斜、動径エントロピー、低/中/高域エネルギー比率、方向エントロピー、異方性指数（2D FFT) |
+| 幾何(拡張) | 消失点confidence（DBSCAN）、直交性、曲率複雑性 |
+| トポロジー | 自由空間比率、最大成分比、平均到達半径、コリドー指数（距離変換） |
+| 色彩(拡張) | 色相円分散、補色コントラスト、彩度/明度コントラスト、主要色占有率（MiniBatchKMeans） |
+| 注意・顕著性 | 注意ピーク比率、注意バランス、注意フロー強度、注意方向一貫性、注意エントロピー（OpenCV StaticSaliencyFineGrained） |
+
+深度推定(MiDaS)・物体検出(YOLOv8)・ヒューマンスケール系の指標は、モデルダウンロード＋CPU推論のレイテンシがリアルタイム分析に不向きなため、今回は見送っています（静止画アップロード時だけ実行する別モードにするのが現実的です）。
+
+各解析結果には `spec_version`（例: `kukan-image-first-metrics-1.0.0+space-analyser-extra-metrics-1.0.0`）が付与され、WebSocketの応答・DBログ・CSVエクスポートすべてに保存されます。指標の算出ロジック自体を変更した場合は該当する `SPEC_VERSION` を更新し、過去ログと区別できるようにしてください。
+
+指標の一覧・ラベル・単位・`core`（KUKAN決定論的コア+動的変化の33指標なら`true`）は `GET /api/metrics/schema` から取得できます。フロントエンドはこれを使って動的に表示を組み立てており、「統合ビュー」のレーダーチャートは可読性のため `core: true` の33指標のみを表示、「詳細」タブでは全59指標を確認できます。
 
 ### 指標を追加するには
 
 - KUKAN仕様に準じた再現性のある指標を追加する場合: `kukan_metric_spec.json` 相当の定義を追い、`kukan_metrics.py` の `analyze_rgba` に実装（既存の関数は変更しない）
+- リアルタイム計算できる新しい拡張指標を追加する場合: `extra_metrics.py` に関数を追加し `compute_extra_metrics()` から呼ぶ
 - 時系列・状態依存の指標（今の動き量・前景占有率のような）を追加する場合: `backend/app/metrics.py` の `FrameAnalyzer.analyze()` に追加
-- どちらの場合も `backend/app/metrics.py` の `METRIC_DEFINITIONS` にキー・ラベル・単位・説明を追加すれば、フロントエンドはスキーマを動的に読み込むため追加のUI改修なしに新しい指標タイルが表示されます
+- いずれの場合も `backend/app/metrics.py` の `METRIC_DEFINITIONS` にキー・ラベル・単位・説明・`core`区分を追加すれば、フロントエンドはスキーマを動的に読み込むため追加のUI改修なしに新しい指標タイルが表示されます
 
 ## ログ
 
